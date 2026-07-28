@@ -1,0 +1,17 @@
+[
+  {
+    "name": "core (VoiceCall)",
+    "path": "dist/core/index.js",
+    "limit": "6 kB"
+  },
+  {
+    "name": "main entry",
+    "path": "dist/index.js",
+    "limit": "8 kB"
+  },
+  {
+    "name": "widgets",
+    "path": "dist/widgets/index.js",
+    "limit": "10 kB"
+  }
+]

@@ -1,0 +1,2 @@
+# Copy to `.dev.vars` for local `wrangler dev`. NEVER commit the real key.
+AETHEX_API_KEY=ae_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
