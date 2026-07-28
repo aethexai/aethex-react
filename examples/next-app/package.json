@@ -1,0 +1,23 @@
+{
+  "name": "aethex-react-next-example",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "copy-orbs": "node ./scripts/copy-orbs.mjs",
+    "predev": "npm run copy-orbs",
+    "dev": "next dev",
+    "prebuild": "npm run copy-orbs",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@aethexai/react": "file:../..",
+    "next": "^14.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "typescript": "^5.6.0"
+  }
+}

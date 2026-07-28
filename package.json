@@ -1,0 +1,135 @@
+{
+  "name": "@aethexai/react",
+  "version": "0.1.0",
+  "description": "React SDK for Aethex voice agents — useAethexCall() hides WebRTC entirely.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aethexai/aethex-react.git"
+  },
+  "homepage": "https://github.com/aethexai/aethex-react#readme",
+  "bugs": "https://github.com/aethexai/aethex-react/issues",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./core": {
+      "import": {
+        "types": "./dist/core/index.d.ts",
+        "default": "./dist/core/index.js"
+      },
+      "require": {
+        "types": "./dist/core/index.d.cts",
+        "default": "./dist/core/index.cjs"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/react/index.d.ts",
+        "default": "./dist/react/index.js"
+      },
+      "require": {
+        "types": "./dist/react/index.d.cts",
+        "default": "./dist/react/index.cjs"
+      }
+    },
+    "./widgets": {
+      "import": {
+        "types": "./dist/widgets/index.d.ts",
+        "default": "./dist/widgets/index.js"
+      },
+      "require": {
+        "types": "./dist/widgets/index.d.cts",
+        "default": "./dist/widgets/index.cjs"
+      }
+    },
+    "./assets/*": "./dist/assets/*",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "size": "size-limit",
+    "docs": "typedoc",
+    "check:exports": "publint && attw --pack . --profile node16",
+    "ci": "npm run format:check && npm run typecheck && npm run lint && npm run test:coverage && npm run build && npm run size && npm run check:exports",
+    "version": "changeset version",
+    "release": "npm run build && changeset publish",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.3",
+    "@changesets/cli": "^2.31.0",
+    "@eslint/js": "^9.39.4",
+    "@size-limit/preset-small-lib": "^11.1.6",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.0.1",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.7",
+    "@vitest/coverage-v8": "^2.1.0",
+    "axe-core": "^4.12.1",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "globals": "^17.6.0",
+    "jsdom": "^25.0.0",
+    "prettier": "^3.4.2",
+    "publint": "^0.2.12",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "size-limit": "^11.1.6",
+    "tsup": "^8.3.0",
+    "typedoc": "^0.27.9",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.61.1",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "aethex",
+    "voice",
+    "webrtc",
+    "react",
+    "sdk",
+    "ai-agent"
+  ]
+}

@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+.next/
+.wrangler/
+.claude/
+next-env.d.ts
+docs/api/
+# Internal planning docs — describe backend architecture; never publish.
+docs/plan_en.md
+docs/plan_fr.md
+*.tgz
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+.dev.vars
+!.dev.vars.example
