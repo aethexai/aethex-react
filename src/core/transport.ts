@@ -1,4 +1,4 @@
-import { AethexError } from "./errors.js"
+import { AethexError, abortReason } from "./errors.js"
 import type {
   AethexCallConfig,
   AethexEndpoints,
@@ -14,6 +14,23 @@ const DEFAULT_ENDPOINTS: AethexEndpoints = {
   ice: "sessions/:id/ice",
   end: "sessions/:id/notify-ended",
   status: "sessions/:id/status",
+  feedback: "sessions/:id/feedback",
+}
+
+// Direct Aethex API — the default target in ephemeral-token mode (getToken).
+const AETHEX_API_BASE = "https://api.aethexai.com/api/v1"
+
+// The real conversation routes, used when talking to the API directly with a
+// call token (instead of a proxy's `sessions/*` paths).
+const CONVERSATION_ENDPOINTS: AethexEndpoints = {
+  connect: "conversation/connect",
+  offer: "conversation/:id/offer",
+  ice: "conversation/:id/ice",
+  end: "conversation/:id/end",
+  status: "conversation/:id/status",
+  // The feedback route lives on the conversations resource (plural), keyed by
+  // the conversation id and authorized by the call token pinned to it.
+  feedback: "conversations/:id/feedback",
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000
@@ -28,11 +45,24 @@ export class Transport {
   private readonly timeoutMs: number
   private readonly fetchImpl: typeof fetch
   private readonly headers: Record<string, string>
+  private readonly getTokenFn: (() => string | Promise<string>) | undefined
+  private authToken: string | null = null
 
   constructor(config: AethexCallConfig) {
-    this.base = config.apiBaseUrl.replace(/\/$/, "")
-    this.endpoints = { ...DEFAULT_ENDPOINTS, ...config.endpoints }
+    const tokenMode = typeof config.getToken === "function"
+    const base = config.apiBaseUrl ?? (tokenMode ? AETHEX_API_BASE : undefined)
+    if (!base) {
+      throw new AethexError("connect_failed", "apiBaseUrl is required (or pass getToken).")
+    }
+    this.base = base.replace(/\/$/, "")
+    // Token mode targets the real API, so it uses the conversation routes; a
+    // proxy uses the `sessions/*` defaults. Either is overridable per endpoint.
+    this.endpoints = {
+      ...(tokenMode ? CONVERSATION_ENDPOINTS : DEFAULT_ENDPOINTS),
+      ...config.endpoints,
+    }
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.getTokenFn = config.getToken
     const globalFetch = typeof fetch !== "undefined" ? fetch : undefined
     const impl = config.fetchImpl ?? globalFetch
     if (!impl) {
@@ -41,6 +71,30 @@ export class Transport {
     // Bind to avoid "Illegal invocation" when fetch is the global.
     this.fetchImpl = impl.bind(globalThis)
     this.headers = { "Content-Type": "application/json", ...config.headers }
+  }
+
+  /**
+   * Mint/fetch the ephemeral call token (once) and arm it as the bearer
+   * credential. No-op when `getToken` isn't configured (proxy mode). Call before
+   * the first signaling request.
+   */
+  async ensureAuth(): Promise<void> {
+    if (!this.getTokenFn || this.authToken) return
+    let token: string
+    try {
+      token = await this.getTokenFn()
+    } catch (err) {
+      throw new AethexError("connect_failed", "getToken() failed to mint a call token.", {
+        recoverable: true,
+        cause: err,
+      })
+    }
+    if (!token) throw new AethexError("connect_failed", "getToken() returned an empty token.")
+    this.authToken = token
+  }
+
+  private authHeaders(): Record<string, string> {
+    return this.authToken ? { ...this.headers, Authorization: `Bearer ${this.authToken}` } : this.headers
   }
 
   /** POST /sessions { agent_id } → { session_id, ice_config }. */
@@ -90,6 +144,31 @@ export class Transport {
     return (await res.json()) as SessionStatusResponse
   }
 
+  /**
+   * POST /sessions/:id/feedback { rating, comment? } — end-of-call rating.
+   * `rating` is clamped to 1..5; an empty/absent comment is omitted.
+   */
+  async submitFeedback(
+    sessionId: string,
+    feedback: { rating: number; comment?: string },
+    signal: AbortSignal,
+  ): Promise<void> {
+    const rating = Math.max(1, Math.min(5, Math.round(feedback.rating)))
+    const body: { rating: number; comment?: string } = { rating }
+    if (feedback.comment != null && feedback.comment !== "") body.comment = feedback.comment
+    const res = await this.request(this.url("feedback", sessionId), {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!res.ok) {
+      throw new AethexError("network", `Failed to submit feedback (${res.status}).`, {
+        status: res.status,
+        recoverable: res.status >= 500,
+      })
+    }
+  }
+
   /** PATCH /sessions/:id/ice — trickle candidates (exempt from quota). */
   async sendIce(
     sessionId: string,
@@ -118,7 +197,7 @@ export class Transport {
     try {
       await this.fetchImpl(this.url("end", sessionId), {
         method: "POST",
-        headers: this.headers,
+        headers: this.authHeaders(),
         keepalive: true,
       })
     } catch {
@@ -137,9 +216,9 @@ export class Transport {
     if (init.signal.aborted) ctrl.abort(init.signal.reason)
     else init.signal.addEventListener("abort", onAbort, { once: true })
 
-    const timer = setTimeout(() => ctrl.abort(new DOMException("timeout", "TimeoutError")), this.timeoutMs)
+    const timer = setTimeout(() => ctrl.abort(abortReason("TimeoutError", "timeout")), this.timeoutMs)
     try {
-      return await this.fetchImpl(url, { ...init, headers: this.headers, signal: ctrl.signal })
+      return await this.fetchImpl(url, { ...init, headers: this.authHeaders(), signal: ctrl.signal })
     } catch (err) {
       if (init.signal.aborted) {
         throw new AethexError("aborted", "The call was stopped before signaling completed.", { cause: err })

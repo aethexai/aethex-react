@@ -595,3 +595,180 @@ describe("VoiceCall — disconnected grace timer", () => {
     expect(errors).toEqual(["peer_failed"])
   })
 })
+
+describe("VoiceCall — ephemeral token mode (getToken)", () => {
+  it("mints a token and hits the conversation routes on the API with Bearer auth", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const getToken = vi.fn(async () => "tok_abc123")
+    // No apiBaseUrl: token mode targets the Aethex API directly.
+    const call = new VoiceCall({ agentId: AGENT, getToken, fetchImpl })
+
+    await call.start()
+
+    expect(getToken).toHaveBeenCalledTimes(1)
+
+    const connectReq = recorder.requests.find((r) => r.url.endsWith("/conversation/connect"))
+    expect(connectReq, "connect should target the conversation route").toBeDefined()
+    expect(connectReq?.url).toBe("https://api.aethexai.com/api/v1/conversation/connect")
+
+    // Every signaling request carries the bearer token, and none hit /sessions.
+    expect(recorder.requests.length).toBeGreaterThan(0)
+    for (const r of recorder.requests) {
+      expect(r.headers.Authorization).toBe("Bearer tok_abc123")
+      expect(r.url).not.toContain("/sessions")
+    }
+  })
+
+  it("surfaces a getToken failure as connect_failed before any signaling", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({
+      agentId: AGENT,
+      getToken: async () => {
+        throw new Error("mint route 500")
+      },
+      fetchImpl,
+    })
+
+    await expect(call.start()).rejects.toMatchObject({ code: "connect_failed" })
+    // Failed before opening a session — no connect request went out.
+    expect(recorder.requests).toHaveLength(0)
+  })
+
+  it("requires either apiBaseUrl or getToken", () => {
+    expect(() => new VoiceCall({ agentId: AGENT } as never)).toThrow(/apiBaseUrl.*getToken/)
+  })
+})
+
+describe("VoiceCall — mute / output volume / output level", () => {
+  it("setMuted/toggleMute flips the local audio track's enabled flag and isMuted", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl })
+    await call.start()
+    const track = (recorder.lastPc?.tracks as Array<{ enabled?: boolean }>)[0]!
+
+    expect(call.isMuted).toBe(false)
+    call.setMuted(true)
+    expect(call.isMuted).toBe(true)
+    expect(track.enabled).toBe(false)
+
+    expect(call.toggleMute()).toBe(false) // returns the NEW state
+    expect(call.isMuted).toBe(false)
+    expect(track.enabled).toBe(true)
+    call.stop()
+  })
+
+  it("honours a mute toggled BEFORE the mic comes up", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl })
+    call.setMuted(true) // no local stream yet — must apply once getUserMedia resolves
+    await call.start()
+    const track = (recorder.lastPc?.tracks as Array<{ enabled?: boolean }>)[0]!
+    expect(track.enabled).toBe(false)
+    call.stop()
+  })
+
+  it("applies output volume to the audio sink, clamps, and re-applies on attach", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl })
+    await call.start()
+
+    // Set BEFORE the remote track attaches — stored, then applied on attach.
+    call.setOutputVolume(0.25)
+    expect(call.outputVolume).toBe(0.25)
+    recorder.lastPc?.emitTrack({ getTracks: () => [] } as unknown as MediaStream)
+    const audio = document.querySelector("audio") as HTMLAudioElement
+    expect(audio.volume).toBeCloseTo(0.25)
+
+    // Live update after attach.
+    call.setOutputVolume(0.8)
+    expect(audio.volume).toBeCloseTo(0.8)
+
+    // Clamp + ignore non-finite (keeps the previous value).
+    call.setOutputVolume(5)
+    expect(audio.volume).toBeCloseTo(1)
+    call.setOutputVolume(Number.NaN)
+    expect(call.outputVolume).toBeCloseTo(1)
+    call.stop()
+  })
+
+  it("getOutputLevel is 0 without an analyser and >0 when WebAudio can measure it", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl })
+    await call.start()
+    expect(call.getOutputLevel()).toBe(0) // before any remote audio
+
+    // Stub a minimal AudioContext so the analyser tap + RMS math run.
+    class FakeAudioContext {
+      createAnalyser() {
+        return {
+          fftSize: 0,
+          smoothingTimeConstant: 0,
+          getByteTimeDomainData: (arr: Uint8Array) => arr.fill(200), // 200 ≠ 128 → non-zero RMS
+        }
+      }
+      createMediaStreamSource() {
+        return { connect: () => {} }
+      }
+      close() {}
+    }
+    const g = globalThis as unknown as { AudioContext?: unknown }
+    const prev = g.AudioContext
+    g.AudioContext = FakeAudioContext
+    try {
+      recorder.lastPc?.emitTrack({ getTracks: () => [] } as unknown as MediaStream)
+      expect(call.getOutputLevel()).toBeCloseTo(0.5625) // (200-128)/128
+    } finally {
+      if (prev === undefined) delete g.AudioContext
+      else g.AudioContext = prev
+      call.stop()
+    }
+  })
+})
+
+describe("VoiceCall — submitFeedback", () => {
+  it("posts rating + comment, clamps/rounds the rating, and omits an empty comment", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl })
+    await call.start()
+
+    await call.submitFeedback(5, "loved it")
+    expect(recorder.feedback).toEqual({ rating: 5, comment: "loved it" })
+    expect(recorder.requests.at(-1)?.url).toMatch(/sessions\/sess-1\/feedback$/)
+
+    await call.submitFeedback(9) // clamps to 5
+    expect(recorder.feedback).toEqual({ rating: 5 })
+    await call.submitFeedback(0) // clamps to 1
+    expect(recorder.feedback).toEqual({ rating: 1 })
+    await call.submitFeedback(3.6) // rounds to 4
+    expect(recorder.feedback).toEqual({ rating: 4 })
+    await call.submitFeedback(4, "") // empty comment omitted
+    expect(recorder.feedback).toEqual({ rating: 4 })
+    call.stop()
+  })
+
+  it("targets the conversations feedback route with the call token in token mode", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({ agentId: AGENT, getToken: () => "tok-1", fetchImpl })
+    await call.start()
+
+    await call.submitFeedback(5)
+    const req = recorder.requests.at(-1)!
+    expect(req.url).toMatch(/conversations\/sess-1\/feedback$/)
+    expect(req.headers.Authorization).toBe("Bearer tok-1")
+    call.stop()
+  })
+
+  it("rejects when the call never opened a session", async () => {
+    const { fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl })
+    await expect(call.submitFeedback(5)).rejects.toMatchObject({ code: "connect_failed" })
+  })
+
+  it("still resolves AFTER stop() — feedback is not tied to the call's abort signal", async () => {
+    const { fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const call = new VoiceCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl })
+    await call.start()
+    call.stop()
+    await expect(call.submitFeedback(4, "post-call")).resolves.toBeUndefined()
+  })
+})

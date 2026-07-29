@@ -193,4 +193,120 @@ describe("useAethexCall", () => {
     expect(first).not.toHaveBeenCalled()
     expect(second).toHaveBeenCalledOnce()
   })
+
+  it("setMuted/toggleMute reflect state and forward to the active call", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const { result } = renderHook(() => useAethexCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl }))
+    await act(async () => {
+      await result.current.start()
+    })
+    const track = (recorder.lastPc?.tracks as Array<{ enabled?: boolean }>)[0]!
+
+    act(() => result.current.setMuted(true))
+    expect(result.current.isMuted).toBe(true)
+    expect(track.enabled).toBe(false)
+
+    let next!: boolean
+    act(() => {
+      next = result.current.toggleMute()
+    })
+    expect(next).toBe(false)
+    expect(result.current.isMuted).toBe(false)
+    expect(track.enabled).toBe(true)
+  })
+
+  it("setOutputVolume clamps, reflects in state, and persists across a restart", async () => {
+    const { fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const { result } = renderHook(() => useAethexCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl }))
+    await act(async () => {
+      await result.current.start()
+    })
+
+    act(() => result.current.setOutputVolume(2)) // clamps to 1
+    expect(result.current.volume).toBe(1)
+    act(() => result.current.setOutputVolume(0.4))
+    expect(result.current.volume).toBeCloseTo(0.4)
+
+    // Restart — the volume preference carries into the fresh call.
+    await act(async () => {
+      await result.current.start()
+    })
+    expect(result.current.volume).toBeCloseTo(0.4)
+  })
+
+  it("submitFeedback forwards to the active call and rejects when there is none", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const { result } = renderHook(() => useAethexCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl }))
+
+    await expect(result.current.submitFeedback(5)).rejects.toMatchObject({ code: "connect_failed" })
+
+    await act(async () => {
+      await result.current.start()
+    })
+    await act(async () => {
+      await result.current.submitFeedback(5, "great")
+    })
+    expect(recorder.feedback).toEqual({ rating: 5, comment: "great" })
+  })
+
+  it("derives isSpeaking from the agent output level while connected", async () => {
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+
+    // Controllable rAF (capture + flush) and clock so the hangover is testable.
+    let rafCb: FrameRequestCallback | null = null
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
+      rafCb = cb
+      return 1
+    })
+    vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation(() => {})
+    let now = 1000
+    vi.spyOn(performance, "now").mockImplementation(() => now)
+    const flush = (): void => {
+      const cb = rafCb
+      rafCb = null
+      cb?.(now)
+    }
+
+    let sampleFill = 200 // 200 → loud, 128 → silent
+    class FakeAudioContext {
+      createAnalyser() {
+        return {
+          fftSize: 0,
+          smoothingTimeConstant: 0,
+          getByteTimeDomainData: (arr: Uint8Array) => arr.fill(sampleFill),
+        }
+      }
+      createMediaStreamSource() {
+        return { connect: () => {} }
+      }
+      close() {}
+    }
+    const g = globalThis as unknown as { AudioContext?: unknown }
+    const prevAC = g.AudioContext
+    g.AudioContext = FakeAudioContext
+
+    try {
+      const { result } = renderHook(() => useAethexCall({ agentId: AGENT, apiBaseUrl: BASE, fetchImpl }))
+      await act(async () => {
+        await result.current.start()
+      })
+      act(() => {
+        recorder.lastPc?.emitTrack({ getTracks: () => [] } as unknown as MediaStream)
+        recorder.lastPc?.setState("connected") // starts the polling loop
+      })
+
+      act(() => flush()) // loud sample → speaking
+      expect(result.current.isSpeaking).toBe(true)
+
+      sampleFill = 128 // silence
+      now = 2000 // past the hangover window
+      act(() => flush())
+      expect(result.current.isSpeaking).toBe(false)
+
+      act(() => result.current.stop())
+    } finally {
+      if (prevAC === undefined) delete g.AudioContext
+      else g.AudioContext = prevAC
+    }
+  })
 })

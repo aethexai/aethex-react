@@ -277,7 +277,7 @@ export default function Showcase() {
               <AethexVoiceOrb
                 agentId="00000000-0000-0000-0000-000000000000"
                 apiBaseUrl="http://localhost:8787"
-                voiceName={name || "Kora"}
+                agentName={name || "Kora"}
                 orbType={variant}
                 title={`Talk to ${name || "Kora"}`}
                 theme="dark"

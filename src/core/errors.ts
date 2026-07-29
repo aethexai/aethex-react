@@ -53,6 +53,19 @@ export function isAethexError(value: unknown): value is AethexError {
 }
 
 /**
+ * Build an `AbortController` abort reason that works everywhere. The browser
+ * uses `DOMException`, but React Native (Hermes) may not define it — so fall
+ * back to a plain `Error` carrying the same `name`, which is all our code (and
+ * the fetch/abort machinery) inspects.
+ */
+export function abortReason(name: "AbortError" | "TimeoutError", message: string): Error {
+  if (typeof DOMException !== "undefined") return new DOMException(message, name)
+  const err = new Error(message)
+  err.name = name
+  return err
+}
+
+/**
  * Map a DOMException from getUserMedia / Permissions to the right code.
  * `NotAllowedError`/`SecurityError` → denied; `NotFoundError` → missing device.
  */

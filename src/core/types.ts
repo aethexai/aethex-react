@@ -63,6 +63,8 @@ export interface AethexEndpoints {
   end: string
   /** GET — current server-side session status. Default: `sessions/:id/status`. */
   status: string
+  /** POST — submit end-of-call feedback. Default: `sessions/:id/feedback`. */
+  feedback: string
 }
 
 /**
@@ -82,12 +84,30 @@ export interface SessionStatusResponse {
   [key: string]: unknown
 }
 
+import type { WebRTCPlatform } from "./platform.js"
+
 /** Options shared by the transport and VoiceCall. */
 export interface AethexCallConfig {
   /** UUID of the agent to call. */
   agentId: string
-  /** Base URL of the **proxy** (never the direct API, never with an API key). */
-  apiBaseUrl: string
+  /**
+   * Base URL of the **proxy** that holds your API key (never the direct API,
+   * never a key). Optional when {@link AethexCallConfig.getToken} is set — then
+   * the SDK talks to the Aethex API directly and this defaults to it.
+   */
+  apiBaseUrl?: string
+  /**
+   * Mint-on-demand **ephemeral call token**. When set, the SDK connects to the
+   * Aethex API directly with `Authorization: Bearer <token>` instead of proxying
+   * every signaling request — you host only a tiny server route that mints the
+   * token with your API key (`POST /api/v1/conversation/token`), and `apiBaseUrl`
+   * defaults to the Aethex API. Called once per call, before connecting.
+   *
+   * Browser callers: your origin must be allow-listed for CORS on the Aethex
+   * API. React Native has no such restriction, so this is the recommended flow
+   * on mobile (no proxy at all).
+   */
+  getToken?: () => string | Promise<string>
   /** Override the signaling endpoint paths. */
   endpoints?: Partial<AethexEndpoints>
   /** Per-request timeout in ms for signaling fetches. Default 15000. */
@@ -108,4 +128,12 @@ export interface AethexCallConfig {
   iceRestart?: boolean
   /** Max consecutive ICE-restart attempts before giving up. Default 1. */
   maxIceRestarts?: number
+  /**
+   * WebRTC + audio adapter. Defaults to the browser implementation
+   * ({@link webPlatform}). The React Native entry (`@aethexai/react` resolved
+   * under the `react-native` condition) injects a `react-native-webrtc` adapter
+   * automatically, so you never set this by hand — it's an advanced escape hatch
+   * for custom hosts.
+   */
+  platform?: WebRTCPlatform
 }

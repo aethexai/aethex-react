@@ -296,4 +296,87 @@ describe("AethexVoiceOrb", () => {
     expect(btn.style.left).toBe("40px")
     expect(btn.style.zIndex).toBe("1200")
   })
+
+  it("controls: mute toggles the mic, hang-up ends the call, and the cluster is accessible", async () => {
+    mockReducedMotion(false)
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    const { container } = render(
+      <AethexVoiceOrb
+        agentId={AGENT}
+        apiBaseUrl={BASE}
+        fetchImpl={fetchImpl}
+        title="Kora"
+        controls
+        float={false}
+      />,
+    )
+    // idle: only the orb button (no control row yet)
+    expect(screen.getAllByRole("button")).toHaveLength(1)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Start voice call/ }))
+    })
+    act(() => {
+      recorder.lastPc?.setState("connected")
+      recorder.lastPc?.emitTrack({ getTracks: () => [] } as unknown as MediaStream)
+    })
+    await expectNoA11yViolations(container)
+
+    const track = (recorder.lastPc?.tracks as Array<{ enabled?: boolean }>)[0]!
+    act(() => fireEvent.click(screen.getByRole("button", { name: "Mute microphone" })))
+    expect(track.enabled).toBe(false)
+    expect(screen.getByRole("button", { name: "Unmute microphone" })).toHaveAttribute("aria-pressed", "true")
+
+    act(() => fireEvent.click(screen.getByRole("button", { name: "Hang up" })))
+    expect(recorder.ops.filter((o) => o === "close")).toHaveLength(1)
+  })
+
+  it("showVolume: renders a volume slider that drives the agent output volume", async () => {
+    mockReducedMotion(false)
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    render(
+      <AethexVoiceOrb agentId={AGENT} apiBaseUrl={BASE} fetchImpl={fetchImpl} showVolume float={false} />,
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Start voice call/ }))
+    })
+    act(() => {
+      recorder.lastPc?.setState("connected")
+      recorder.lastPc?.emitTrack({ getTracks: () => [] } as unknown as MediaStream)
+    })
+    const slider = screen.getByRole("slider", { name: "Output volume" }) as HTMLInputElement
+    act(() => fireEvent.change(slider, { target: { value: "0.3" } }))
+    const audio = document.querySelector("audio") as HTMLAudioElement
+    expect(audio.volume).toBeCloseTo(0.3)
+  })
+
+  it("feedback: shows a post-call rating prompt that submits via the call token", async () => {
+    mockReducedMotion(false)
+    const { recorder, fetchImpl } = installWebRTCMocks({ micPermission: "granted" })
+    render(
+      <AethexVoiceOrb
+        agentId={AGENT}
+        apiBaseUrl={BASE}
+        fetchImpl={fetchImpl}
+        title="Kora"
+        feedback
+        float={false}
+      />,
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Start voice call/ }))
+    })
+    act(() => {
+      recorder.lastPc?.setState("connected")
+      recorder.lastPc?.emitTrack({ getTracks: () => [] } as unknown as MediaStream)
+    })
+    // hang up (tap the orb) → status ended → the thumbs prompt appears
+    act(() => fireEvent.click(screen.getByRole("button", { name: /End voice call/ })))
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Good call" }))
+    })
+    expect(recorder.feedback).toEqual({ rating: 5 })
+    expect(screen.getByText("Thanks for the feedback")).toBeInTheDocument()
+  })
 })

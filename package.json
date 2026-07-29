@@ -1,7 +1,7 @@
 {
   "name": "@aethexai/react",
-  "version": "0.1.0",
-  "description": "React SDK for Aethex voice agents — useAethexCall() hides WebRTC entirely.",
+  "version": "1.0.0",
+  "description": "React SDK for Aethex voice agents. useAethexCall() hides WebRTC entirely.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -18,9 +18,14 @@
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
+  "react-native": "./dist/native.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "react-native": {
+        "types": "./dist/native.d.ts",
+        "default": "./dist/native.js"
+      },
       "import": {
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
@@ -51,6 +56,10 @@
       }
     },
     "./widgets": {
+      "react-native": {
+        "types": "./dist/widgets/native.d.ts",
+        "default": "./dist/widgets/native.js"
+      },
       "import": {
         "types": "./dist/widgets/index.d.ts",
         "default": "./dist/widgets/index.js"
@@ -58,6 +67,16 @@
       "require": {
         "types": "./dist/widgets/index.d.cts",
         "default": "./dist/widgets/index.cjs"
+      }
+    },
+    "./native": {
+      "import": {
+        "types": "./dist/native.d.ts",
+        "default": "./dist/native.js"
+      },
+      "require": {
+        "types": "./dist/native.d.cts",
+        "default": "./dist/native.cjs"
       }
     },
     "./assets/*": "./dist/assets/*",
@@ -83,13 +102,33 @@
   },
   "peerDependencies": {
     "react": ">=18",
-    "react-dom": ">=18"
+    "react-dom": ">=18",
+    "react-native": ">=0.70",
+    "react-native-webrtc": ">=118.0.0",
+    "react-native-incall-manager": ">=4.0.0",
+    "@shopify/react-native-skia": ">=1.0.0",
+    "react-native-reanimated": ">=3.0.0"
   },
   "peerDependenciesMeta": {
     "react": {
       "optional": true
     },
     "react-dom": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    },
+    "react-native-webrtc": {
+      "optional": true
+    },
+    "react-native-incall-manager": {
+      "optional": true
+    },
+    "@shopify/react-native-skia": {
+      "optional": true
+    },
+    "react-native-reanimated": {
       "optional": true
     }
   },

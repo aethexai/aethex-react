@@ -13,6 +13,12 @@
  * the body verbatim, so an ICE restart (`restart_pc: true`, with the existing
  * `pc_id`) works without special handling.
  *
+ * It also exposes `POST /token`, which mints an ephemeral call token
+ * (`POST /api/v1/conversation/token`). That's all you need for the SDK's
+ * `getToken` flow: the browser / React Native app fetches a token here, then
+ * talks to the Aethex API directly — no signaling proxy required. On mobile
+ * (no CORS) this is the recommended path.
+ *
  * Secrets / vars (see .dev.vars.example and wrangler.toml):
  *   AETHEX_API_KEY    (secret)  — API key with the calls scope
  *   AETHEX_BASE_URL   (var)     — the Aethex API base URL
@@ -109,6 +115,25 @@ async function route(request, url, env) {
       return json({ error: "agent_not_allowed" }, 403)
     }
     return upstream(env, "POST", "/api/v1/conversation/connect", { agent_id: agentId })
+  }
+
+  // POST /token  →  mint an ephemeral call token for the SDK's `getToken` flow.
+  // The client sends { agent_id, ttl_seconds? }; we add the key and return the
+  // API's { token, expires_in, expires_at, agent_id }. The token is scoped to
+  // this one agent and short-lived, so it's safe to hand to the browser / app.
+  if (pathname === "/token" && method === "POST") {
+    const body = await safeJson(request)
+    const agentId = body?.agent_id
+    if (typeof agentId !== "string" || !UUID_RE.test(agentId)) {
+      return json({ error: "invalid_agent_id" }, 400)
+    }
+    if (!isAllowedAgent(agentId, env)) {
+      return json({ error: "agent_not_allowed" }, 403)
+    }
+    const payload = { agent_id: agentId }
+    const ttl = Number(body?.ttl_seconds)
+    if (Number.isFinite(ttl) && ttl > 0) payload.ttl_seconds = ttl
+    return upstream(env, "POST", "/api/v1/conversation/token", payload)
   }
 
   // POST /sessions/:id/offer

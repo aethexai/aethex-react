@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Aethex Voice Example",
+    "slug": "aethex-voice-example",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "aethexvoice",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.aethexai.voiceexample",
+      "supportsTablet": true,
+      "bitcode": false
+    },
+    "android": {
+      "package": "com.aethexai.voiceexample",
+      "permissions": [
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ]
+    },
+    "plugins": [
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to use your microphone for voice calls."
+        }
+      ],
+      "expo-asset"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "73834783-7943-445b-b2b0-6903b0544f39"
+      }
+    },
+    "owner": "ayooluwaodemuyiwa"
+  }
+}

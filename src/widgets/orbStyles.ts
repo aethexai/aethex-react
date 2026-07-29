@@ -61,7 +61,38 @@ export const ORB_CSS = `
 }
 .aethex-orb__time{color:var(--aethex-dim); font-weight:500; font-variant-numeric:tabular-nums;}
 .aethex-orb__sub{margin:2px 0 0; font-size:12px; color:var(--aethex-dim); white-space:nowrap; font-weight:400;}
+/* isSpeaking: a soft breathing glow on the orb while the agent is talking. */
+.aethex-orb[data-speaking="true"] .aethex-orb__orb{
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--aethex-accent) 38%, transparent), 0 0 20px -2px var(--aethex-accent);
+}
+/* Control cluster: the orb capsule stacked over a row of round controls, plus an
+   optional post-call feedback row. Only rendered when \`controls\`/\`feedback\` are on. */
+.aethex-orb-cluster{
+  display:inline-flex; flex-direction:column; align-items:center; gap:12px;
+  font-family:var(--aethex-font, inherit); box-sizing:border-box;
+}
+.aethex-orb-cluster *{box-sizing:border-box;}
+.aethex-orb-cluster[data-theme="dark"]{
+  --aethex-surface:#12141d; --aethex-c-line:#2A2E3A; --aethex-ink:#EDEEF4; --aethex-dim:#9097AC;
+}
+.aethex-orb__controls{display:inline-flex; align-items:center; gap:10px;}
+.aethex-orb__ctrl{
+  appearance:none; -webkit-appearance:none; display:inline-flex; align-items:center; justify-content:center;
+  width:44px; height:44px; border-radius:50%; border:1px solid var(--aethex-c-line);
+  background:var(--aethex-surface); color:var(--aethex-ink); cursor:pointer;
+  transition:transform .12s ease, background .2s ease, border-color .2s ease, color .2s ease, filter .2s ease;
+}
+.aethex-orb__ctrl svg{width:20px; height:20px; display:block;}
+.aethex-orb__ctrl:hover{transform:translateY(-1px);}
+.aethex-orb__ctrl:active{transform:translateY(0);}
+.aethex-orb__ctrl:focus-visible{outline:2px solid var(--aethex-accent); outline-offset:3px;}
+.aethex-orb__ctrl[aria-pressed="true"]{background:var(--aethex-accent); border-color:var(--aethex-accent); color:#fff;}
+.aethex-orb__ctrl--danger{background:var(--aethex-danger); border-color:var(--aethex-danger); color:#fff;}
+.aethex-orb__ctrl--danger:hover{filter:brightness(1.06);}
+.aethex-orb__vol{width:96px; accent-color:var(--aethex-accent); cursor:pointer;}
+.aethex-orb__feedback{display:inline-flex; align-items:center; gap:10px;}
+.aethex-orb__thanks{font-size:13px; color:var(--aethex-dim);}
 @media (prefers-reduced-motion: reduce){
-  .aethex-orb, .aethex-orb__orb{transition:none;}
+  .aethex-orb, .aethex-orb__orb, .aethex-orb__ctrl{transition:none;}
 }
 `

@@ -1,5 +1,6 @@
-import { AethexError, fromMediaError } from "./errors.js"
+import { AethexError, abortReason } from "./errors.js"
 import { noopLogger, type Logger } from "./logger.js"
+import { webPlatform, type RemoteAudioHandle, type WebRTCPlatform } from "./platform.js"
 import { Transport } from "./transport.js"
 import type { AethexCallConfig, CallStatus, PipelineMetrics, SessionStatusResponse } from "./types.js"
 
@@ -50,13 +51,18 @@ export class VoiceCall {
   private readonly log: Logger
   private readonly iceRestartEnabled: boolean
   private readonly maxIceRestarts: number
+  private readonly platform: WebRTCPlatform
 
   private pc: RTCPeerConnection | null = null
   private dc: RTCDataChannel | null = null
   private localStream: MediaStream | null = null
-  private remoteAudio: HTMLAudioElement | null = null
+  private remoteAudio: RemoteAudioHandle | null = null
   private sessionId: string | null = null
   private pcId: string | null = null
+
+  /** Mic-mute + agent-volume state, applied to tracks / the sink when present. */
+  private muted = false
+  private volumeLevel = 1
 
   private iceQueue: RTCIceCandidate[] = []
   private flushScheduled = false
@@ -74,8 +80,13 @@ export class VoiceCall {
 
   constructor(options: VoiceCallOptions) {
     if (!options.agentId) throw new AethexError("connect_failed", "agentId is required.")
-    if (!options.apiBaseUrl) throw new AethexError("connect_failed", "apiBaseUrl is required.")
-    if (/ae_live_/.test(options.apiBaseUrl)) {
+    if (!options.apiBaseUrl && !options.getToken) {
+      throw new AethexError(
+        "connect_failed",
+        "Provide apiBaseUrl (a proxy) or getToken (an ephemeral call token).",
+      )
+    }
+    if (options.apiBaseUrl && /ae_live_/.test(options.apiBaseUrl)) {
       // Loud guard against a common misuse: pointing at the direct API / a key.
       throw new AethexError(
         "connect_failed",
@@ -89,6 +100,7 @@ export class VoiceCall {
     this.log = options.logger ?? noopLogger
     this.iceRestartEnabled = options.iceRestart ?? true
     this.maxIceRestarts = Math.max(0, options.maxIceRestarts ?? 1)
+    this.platform = options.platform ?? webPlatform
   }
 
   getSessionId(): string | null {
@@ -111,11 +123,15 @@ export class VoiceCall {
     this.setStatus("connecting")
 
     try {
+      // 0) Mint/fetch the ephemeral call token (if configured) before signaling.
+      await this.transport.ensureAuth()
+      this.throwIfClosed()
+
       // 1) Create the session and learn the ICE servers.
       const conn = await this.transport.connect(this.agentId, this.abort.signal)
       this.throwIfClosed()
       this.sessionId = conn.session_id
-      const pc = new RTCPeerConnection(conn.ice_config)
+      const pc = this.platform.createPeerConnection(conn.ice_config)
       this.pc = pc
 
       // Pre-check mic permission — some browsers resolve getUserMedia on a prior
@@ -126,11 +142,7 @@ export class VoiceCall {
       // STEP A: acquire mic and addTrack FIRST so the audio m-section precedes
       // the data channel in the offer. Adding them in the other order fails to
       // establish the connection.
-      try {
-        this.localStream = await navigator.mediaDevices.getUserMedia({ audio: this.audioConstraints })
-      } catch (err) {
-        throw fromMediaError(err)
-      }
+      this.localStream = await this.platform.getUserMedia({ audio: this.audioConstraints })
       if (this.localStream.getAudioTracks().length === 0) {
         this.localStream.getTracks().forEach((t) => t.stop())
         this.localStream = null
@@ -140,6 +152,8 @@ export class VoiceCall {
       for (const track of this.localStream.getTracks()) {
         pc.addTrack(track, this.localStream)
       }
+      // Honour a mute toggled before the mic came up.
+      this.applyMuted()
 
       pc.ontrack = (ev) => this.handleRemoteTrack(ev)
 
@@ -193,6 +207,53 @@ export class VoiceCall {
     this.send({ type: "inject_interrupt" })
   }
 
+  /** Mute or unmute the local microphone (disables/enables the audio track). */
+  setMuted(muted: boolean): void {
+    this.muted = muted
+    this.applyMuted()
+  }
+
+  /** Flip the mic mute and return the new muted state. */
+  toggleMute(): boolean {
+    this.setMuted(!this.muted)
+    return this.muted
+  }
+
+  /** Whether the local microphone is currently muted. */
+  get isMuted(): boolean {
+    return this.muted
+  }
+
+  /**
+   * Set the agent's output volume in 0..1. Web applies it to the audio sink;
+   * React Native routes at the device level, so this is a no-op there. Stored
+   * and re-applied when the remote audio attaches, so it is safe to call early.
+   */
+  setOutputVolume(volume: number): void {
+    this.volumeLevel = Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : this.volumeLevel
+    this.remoteAudio?.setVolume?.(this.volumeLevel)
+  }
+
+  /** Current agent output volume in 0..1 (defaults to 1). */
+  get outputVolume(): number {
+    return this.volumeLevel
+  }
+
+  /**
+   * Instantaneous agent output level in ~0..1 (RMS), for driving an
+   * `isSpeaking` indicator or a visualizer. Returns 0 when the platform can't
+   * measure it (e.g. React Native) or before audio attaches.
+   */
+  getOutputLevel(): number {
+    return this.remoteAudio?.getLevel?.() ?? 0
+  }
+
+  private applyMuted(): void {
+    const stream = this.localStream
+    if (!stream) return
+    for (const track of stream.getAudioTracks()) track.enabled = !this.muted
+  }
+
   /** Send an arbitrary control message over the `chat` data channel. */
   send(message: unknown): void {
     if (this.dc?.readyState === "open") {
@@ -216,6 +277,24 @@ export class VoiceCall {
       throw new AethexError("connect_failed", "No active session to query status for.")
     }
     return this.transport.getStatus(this.sessionId, signal ?? new AbortController().signal)
+  }
+
+  /**
+   * Submit end-of-call feedback for this session — a 1..5 `rating` (clamped) and
+   * an optional free-text `comment`, authorized by the call token. Like
+   * {@link getRemoteStatus}, it works after the call ends and is NOT tied to the
+   * call's abort signal; pass your own `signal` to cancel. Rejects if the call
+   * never opened a session.
+   */
+  async submitFeedback(rating: number, comment?: string, signal?: AbortSignal): Promise<void> {
+    if (!this.sessionId) {
+      throw new AethexError("connect_failed", "No session to submit feedback for.")
+    }
+    await this.transport.submitFeedback(
+      this.sessionId,
+      comment !== undefined ? { rating, comment } : { rating },
+      signal ?? new AbortController().signal,
+    )
   }
 
   /** Idempotent user-initiated teardown. Safe to call multiple times. */
@@ -259,7 +338,7 @@ export class VoiceCall {
     if (this.released) return
     this.released = true
 
-    this.abort.abort(new DOMException("call stopped", "AbortError"))
+    this.abort.abort(abortReason("AbortError", "call stopped"))
     if (this.disconnectTimer) {
       clearTimeout(this.disconnectTimer)
       this.disconnectTimer = null
@@ -287,8 +366,11 @@ export class VoiceCall {
       /* ignore */
     }
     if (this.remoteAudio) {
-      this.remoteAudio.srcObject = null
-      this.remoteAudio.remove()
+      try {
+        this.remoteAudio.detach()
+      } catch {
+        /* ignore */
+      }
       this.remoteAudio = null
     }
     if (this.sessionId) void this.transport.end(this.sessionId)
@@ -299,44 +381,27 @@ export class VoiceCall {
   }
 
   private assertSupported(): void {
-    const hasRTC = typeof RTCPeerConnection !== "undefined"
-    const hasMedia = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia
-    if (!hasRTC || !hasMedia) {
-      throw new AethexError("unsupported_browser", "This browser does not support WebRTC microphone calls.")
+    if (!this.platform.isSupported()) {
+      throw new AethexError("unsupported_browser", "This host does not support WebRTC microphone calls.")
     }
   }
 
   private async precheckMic(): Promise<void> {
-    try {
-      const perms = (navigator as Navigator & { permissions?: Permissions }).permissions
-      if (perms?.query) {
-        const status = await perms.query({ name: "microphone" as PermissionName })
-        if (status?.state === "denied") {
-          throw new AethexError("mic_denied", "Microphone is blocked by browser policy.")
-        }
-      }
-    } catch (err) {
-      if (err instanceof AethexError) throw err
-      // Permissions API unsupported / threw — fall through to getUserMedia.
+    // A definitive "denied" lets us fail fast with the right code before the
+    // getUserMedia prompt. "unknown" (React Native, older browsers) falls
+    // through to getUserMedia, which prompts and maps its own errors.
+    if ((await this.platform.queryMicrophonePermission()) === "denied") {
+      throw new AethexError("mic_denied", "Microphone is blocked by device or browser policy.")
     }
   }
 
   private handleRemoteTrack(ev: RTCTrackEvent): void {
     const [stream] = ev.streams
     if (!stream) return
+    // Attach the audio sink once — a voice call has a single remote audio stream.
     if (!this.remoteAudio) {
-      this.remoteAudio = document.createElement("audio")
-      this.remoteAudio.autoplay = true
-      this.remoteAudio.setAttribute("playsinline", "true")
-      document.body.appendChild(this.remoteAudio)
-    }
-    this.remoteAudio.srcObject = stream
-    // Autoplay may be blocked until a user gesture; never let it crash the call.
-    try {
-      const p = this.remoteAudio.play?.()
-      if (p && typeof p.catch === "function") p.catch(() => {})
-    } catch {
-      /* ignore */
+      this.remoteAudio = this.platform.attachRemoteAudio(stream)
+      this.remoteAudio.setVolume?.(this.volumeLevel)
     }
     this.cb.onRemoteStream?.(stream)
   }

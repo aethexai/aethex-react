@@ -9,6 +9,8 @@ export interface MockRecorder {
   ops: string[]
   createOfferArgs: unknown[]
   iceSent: Array<{ pc_id: string | null; candidates: unknown[] }>
+  requests: Array<{ url: string; method: string; headers: Record<string, string> }>
+  feedback: { rating?: number; comment?: string } | null
   endCalled: boolean
   handlersNullAtClose: boolean | null
   lastPc: FakePeerConnection | null
@@ -163,6 +165,8 @@ export function installWebRTCMocks(opts: MockOptions = {}): {
     ops: [],
     createOfferArgs: [],
     iceSent: [],
+    requests: [],
+    feedback: null,
     endCalled: false,
     handlersNullAtClose: null,
     lastPc: null,
@@ -199,7 +203,8 @@ export function installWebRTCMocks(opts: MockOptions = {}): {
   const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = init?.method ?? "GET"
-    if (url.endsWith("/sessions") && method === "POST") {
+    recorder.requests.push({ url, method, headers: (init?.headers as Record<string, string>) ?? {} })
+    if ((url.endsWith("/sessions") || url.endsWith("/conversation/connect")) && method === "POST") {
       recorder.ops.push("connect")
       if (opts.connect && !opts.connect.ok) {
         return makeResponse(null, {
@@ -229,7 +234,12 @@ export function installWebRTCMocks(opts: MockOptions = {}): {
       recorder.ops.push("status")
       return makeResponse({ session_id: "sess-1", status: "active", duration_s: 12, turn_count: 3 })
     }
-    if (url.includes("notify-ended")) {
+    if (url.includes("/feedback") && method === "POST") {
+      recorder.ops.push("feedback")
+      recorder.feedback = JSON.parse(String(init?.body))
+      return makeResponse({ ok: true })
+    }
+    if (url.includes("notify-ended") || url.endsWith("/end")) {
       recorder.endCalled = true
       return makeResponse(null)
     }

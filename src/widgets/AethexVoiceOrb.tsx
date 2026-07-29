@@ -45,6 +45,49 @@ const VARIANT: Record<OrbType, Pick<VoiceCfg, "grid" | "scan" | "density" | "see
 
 const ORB_PX: Record<"sm" | "md" | "lg", number> = { sm: 38, md: 48, lg: 60 }
 
+// Compact inline icons for the control cluster (stroke/fill = currentColor).
+const stroke = {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+} as const
+
+function MicIcon({ off }: { off?: boolean }) {
+  return (
+    <svg {...stroke} aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
+      {off && <path d="M4 4l16 16" />}
+    </svg>
+  )
+}
+
+function HangupIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path
+        transform="rotate(135 12 12)"
+        d="M6.6 10.8c1.4 2.8 3.8 5.2 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.4c.6 0 1 .4 1 1 0 1.2.2 2.4.6 3.6.1.4 0 .8-.3 1l-2.1 2.2z"
+      />
+    </svg>
+  )
+}
+
+function ThumbIcon({ down }: { down?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <g transform={down ? "rotate(180 12 12)" : undefined}>
+        <path d="M2 10h4v11H2z" />
+        <path d="M6 10.5 11 3a1.7 1.7 0 0 1 3 1.3L13.2 9H19a2 2 0 0 1 2 2.4l-1.4 6.6A2 2 0 0 1 17.6 21H6z" />
+      </g>
+    </svg>
+  )
+}
+
 export interface AethexVoiceOrbProps extends UseAethexCallOptions {
   /** Idle status line + accessible region name. */
   title?: string
@@ -54,16 +97,17 @@ export interface AethexVoiceOrbProps extends UseAethexCallOptions {
   labels?: AethexVoiceOrbLabels
 
   /**
-   * Texture variant of the voice-fingerprint orb (colour is always seeded from
-   * the voice/agent). One of `aurora` (Agent Studio default), `pulse`, `fluid`,
-   * `liquid`, `pixel`. Ignored when {@link videoSrc} is set.
+   * Texture variant of the orb (colour is always seeded from the agent). One of
+   * `aurora` (the default), `pulse`, `fluid`, `liquid`, `pixel`. Ignored when
+   * {@link videoSrc} is set.
    */
   orbType?: OrbType
   /**
-   * Seed for the fingerprint's colour + pattern. Defaults to the `agentId`, so
-   * each agent gets its own stable orb. Pass an agent's display name to match the
-   * exact colour it shows in Agent Studio.
+   * Seed for the orb's colour + pattern. Defaults to the `agentId`, so each agent
+   * gets its own stable orb. Pass the agent's display name to seed by name.
    */
+  agentName?: string
+  /** @deprecated Renamed to {@link agentName}; still honoured. */
   voiceName?: string
   /**
    * Video orb source. When set, the orb renders a looping, muted `<video>`
@@ -105,6 +149,19 @@ export interface AethexVoiceOrbProps extends UseAethexCallOptions {
   /** Stacking order when floating. Default `9999`. */
   zIndex?: number
 
+  /**
+   * Show in-call controls under the orb — a mute toggle and a stylized red
+   * hang-up button. Off by default (the orb itself toggles the call on tap).
+   */
+  controls?: boolean
+  /** Add an output-volume slider to the in-call controls. Web only. Implies {@link controls}. */
+  showVolume?: boolean
+  /**
+   * After a call ends, show a 👍 / 👎 prompt that submits a rating (5 / 1) for
+   * the just-ended session via the call token. Off by default.
+   */
+  feedback?: boolean
+
   className?: string
   style?: CSSProperties
 }
@@ -121,12 +178,12 @@ function injectStyles(): void {
 }
 
 /**
- * Inline voice widget where the orb *is* the button. The orb is the deterministic
- * voice fingerprint (Agent Studio's `voice-visual` engine): colour + pattern are
- * seeded from `voiceName` (or the agent id), it holds a **single static frame at
- * rest**, and self-animates only while connecting / in a call. Tapping starts the
- * call; the capsule then extends to show status + an in-call timer. Tapping again
- * hangs up. SSR-safe and honors `prefers-reduced-motion`.
+ * Inline voice widget where the orb *is* the button. The orb is a deterministic
+ * visual seeded from `agentName` (or the agent id): colour + pattern stay stable
+ * per agent, it holds a **single static frame at rest**, and self-animates only
+ * while connecting / in a call. Tapping starts the call; the capsule then extends
+ * to show status + an in-call timer. Tapping again hangs up. SSR-safe and honors
+ * `prefers-reduced-motion`.
  */
 export function AethexVoiceOrb(props: AethexVoiceOrbProps) {
   const {
@@ -134,6 +191,7 @@ export function AethexVoiceOrb(props: AethexVoiceOrbProps) {
     description,
     labels = {},
     orbType = "aurora",
+    agentName,
     voiceName,
     videoSrc,
     accent = "#7C6CFF",
@@ -148,6 +206,9 @@ export function AethexVoiceOrb(props: AethexVoiceOrbProps) {
     float = true,
     floatOffset = 24,
     zIndex = 9999,
+    controls = false,
+    showVolume = false,
+    feedback = false,
     className,
     style,
     ...callOptions
@@ -164,9 +225,31 @@ export function AethexVoiceOrb(props: AethexVoiceOrbProps) {
       })()
     : {}
 
-  const { status, isConnecting, isConnected, start, stop, error } = useAethexCall(callOptions)
+  const {
+    status,
+    isConnecting,
+    isConnected,
+    isSpeaking,
+    isMuted,
+    volume,
+    start,
+    stop,
+    error,
+    toggleMute,
+    setOutputVolume,
+    submitFeedback,
+  } = useAethexCall(callOptions)
   const reduced = usePrefersReducedMotion()
   const [seconds, setSeconds] = useState(0)
+  // Post-call feedback prompt: shown once a call ends, dismissed after a vote or
+  // when the next call begins.
+  const [feedbackSent, setFeedbackSent] = useState(false)
+  useEffect(() => {
+    if (status === "connecting") setFeedbackSent(false)
+  }, [status])
+  const showControls = controls || showVolume
+  const showFeedback = feedback && status === "ended"
+  const hasCluster = showControls || showFeedback
 
   const phase: Phase =
     status === "connected"
@@ -201,10 +284,10 @@ export function AethexVoiceOrb(props: AethexVoiceOrbProps) {
     return () => clearInterval(id)
   }, [status])
 
-  // Voice-fingerprint canvas — Agent Studio's `voice-visual` engine. Colour +
-  // texture are seeded from `voiceName` (or the agent id); the engine loops while
-  // connecting / in-call and paints a single static frame otherwise.
-  const seed = voiceName ?? props.agentId ?? "aethex"
+  // Voice-fingerprint canvas. Colour + texture are seeded from `agentName` (or
+  // the agent id); the engine loops while connecting / in-call and paints a
+  // single static frame otherwise.
+  const seed = agentName ?? voiceName ?? props.agentId ?? "aethex"
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   useEffect(() => {
     if (resolvedVideoSrc) return // video mode: no fingerprint
@@ -285,65 +368,156 @@ export function AethexVoiceOrb(props: AethexVoiceOrbProps) {
   if (mutedColor) vars["--aethex-dim"] = mutedColor
   if (font) vars["--aethex-font"] = font
   const rootStyle = { ...vars, ...floatStyle, ...style } as CSSProperties
+  // With a control cluster, positioning/vars live on the wrapper and the orb
+  // button sits inline within it; without one, the button itself is the root.
+  const buttonStyle = hasCluster ? undefined : rootStyle
+  const buttonFloat = hasCluster ? undefined : (corner ?? undefined)
+
+  const orbButton = (
+    <button
+      type="button"
+      className={["aethex-orb", className].filter(Boolean).join(" ")}
+      style={buttonStyle}
+      data-state={phase}
+      data-theme={theme}
+      data-size={size}
+      data-orb-only={orbOnly}
+      data-float={buttonFloat}
+      data-speaking={isConnected && isSpeaking ? "true" : undefined}
+      aria-pressed={active}
+      aria-busy={isConnecting || undefined}
+      aria-label={ariaLabel}
+      onClick={active ? stop : start}
+    >
+      <span className="aethex-orb__orb">
+        {resolvedVideoSrc ? (
+          <video
+            ref={videoRef}
+            key={resolvedVideoSrc}
+            src={resolvedVideoSrc}
+            muted
+            loop
+            playsInline
+            autoPlay={false}
+            preload="auto"
+            aria-hidden="true"
+          />
+        ) : (
+          <canvas ref={canvasRef} aria-hidden="true" />
+        )}
+      </span>
+
+      {showBody && (
+        <span className="aethex-orb__body">
+          {statusLine && (
+            <span className="aethex-orb__label">
+              <span className="aethex-orb__txt">{statusLine}</span>
+              {phase === "incall" && (
+                <span className="aethex-orb__time" aria-hidden="true">
+                  · {timer}
+                </span>
+              )}
+            </span>
+          )}
+          {sub && (
+            <span className="aethex-orb__sub" aria-hidden="true">
+              {sub}
+            </span>
+          )}
+        </span>
+      )}
+    </button>
+  )
+
+  const controlsNode =
+    showControls && active ? (
+      <div className="aethex-orb__controls">
+        <button
+          type="button"
+          className="aethex-orb__ctrl"
+          onClick={() => toggleMute()}
+          aria-pressed={isMuted}
+          aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+          title={isMuted ? "Unmute" : "Mute"}
+        >
+          <MicIcon off={isMuted} />
+        </button>
+        {showVolume && (
+          <input
+            className="aethex-orb__vol"
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => setOutputVolume(Number(e.target.value))}
+            aria-label="Output volume"
+          />
+        )}
+        <button
+          type="button"
+          className="aethex-orb__ctrl aethex-orb__ctrl--danger"
+          onClick={stop}
+          aria-label="Hang up"
+          title="Hang up"
+        >
+          <HangupIcon />
+        </button>
+      </div>
+    ) : null
+
+  const feedbackNode = showFeedback ? (
+    <div className="aethex-orb__feedback">
+      {feedbackSent ? (
+        <span className="aethex-orb__thanks">Thanks for the feedback</span>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="aethex-orb__ctrl"
+            aria-label="Good call"
+            title="Good call"
+            onClick={() => void submitFeedback(5).finally(() => setFeedbackSent(true))}
+          >
+            <ThumbIcon />
+          </button>
+          <button
+            type="button"
+            className="aethex-orb__ctrl"
+            aria-label="Bad call"
+            title="Bad call"
+            onClick={() => void submitFeedback(1).finally(() => setFeedbackSent(true))}
+          >
+            <ThumbIcon down />
+          </button>
+        </>
+      )}
+    </div>
+  ) : null
+
+  const statusRegion = (
+    <span role="status" aria-live="polite" style={srOnly}>
+      {announce}
+    </span>
+  )
+
+  if (!hasCluster) {
+    return (
+      <>
+        {orbButton}
+        {statusRegion}
+      </>
+    )
+  }
 
   return (
     <>
-      <button
-        type="button"
-        className={["aethex-orb", className].filter(Boolean).join(" ")}
-        style={rootStyle}
-        data-state={phase}
-        data-theme={theme}
-        data-size={size}
-        data-orb-only={orbOnly}
-        data-float={corner ?? undefined}
-        aria-pressed={active}
-        aria-busy={isConnecting || undefined}
-        aria-label={ariaLabel}
-        onClick={active ? stop : start}
-      >
-        <span className="aethex-orb__orb">
-          {resolvedVideoSrc ? (
-            <video
-              ref={videoRef}
-              key={resolvedVideoSrc}
-              src={resolvedVideoSrc}
-              muted
-              loop
-              playsInline
-              autoPlay={false}
-              preload="auto"
-              aria-hidden="true"
-            />
-          ) : (
-            <canvas ref={canvasRef} aria-hidden="true" />
-          )}
-        </span>
-
-        {showBody && (
-          <span className="aethex-orb__body">
-            {statusLine && (
-              <span className="aethex-orb__label">
-                <span className="aethex-orb__txt">{statusLine}</span>
-                {phase === "incall" && (
-                  <span className="aethex-orb__time" aria-hidden="true">
-                    · {timer}
-                  </span>
-                )}
-              </span>
-            )}
-            {sub && (
-              <span className="aethex-orb__sub" aria-hidden="true">
-                {sub}
-              </span>
-            )}
-          </span>
-        )}
-      </button>
-
-      <span role="status" aria-live="polite" style={srOnly}>
-        {announce}
-      </span>
+      <div className="aethex-orb-cluster" style={rootStyle} data-theme={theme}>
+        {orbButton}
+        {controlsNode}
+        {feedbackNode}
+      </div>
+      {statusRegion}
     </>
   )
 }

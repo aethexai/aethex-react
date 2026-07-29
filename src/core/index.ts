@@ -1,6 +1,8 @@
 export { VoiceCall } from "./VoiceCall.js"
 export type { VoiceCallOptions, VoiceCallCallbacks } from "./VoiceCall.js"
 export { Transport } from "./transport.js"
+export { webPlatform } from "./platform.js"
+export type { WebRTCPlatform } from "./platform.js"
 export { AethexError, isAethexError, fromMediaError } from "./errors.js"
 export type { AethexErrorCode, AethexErrorOptions } from "./errors.js"
 export { noopLogger } from "./logger.js"

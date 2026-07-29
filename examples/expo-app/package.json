@@ -1,0 +1,30 @@
+{
+  "name": "aethex-expo-example",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "prebuild": "expo prebuild --clean",
+    "ios": "expo run:ios --device",
+    "android": "expo run:android"
+  },
+  "dependencies": {
+    "@aethexai/react": "file:./vendor/aethexai-react",
+    "@shopify/react-native-skia": "1.5.0",
+    "expo": "~52.0.0",
+    "expo-asset": "~11.0.5",
+    "expo-dev-client": "~5.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.9",
+    "react-native-incall-manager": "^4.2.2",
+    "react-native-reanimated": "~3.16.1",
+    "react-native-webrtc": "^124.0.8"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@config-plugins/react-native-webrtc": "^10.0.0",
+    "@types/react": "~18.3.12",
+    "typescript": "~5.6.0"
+  }
+}

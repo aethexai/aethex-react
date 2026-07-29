@@ -1,13 +1,42 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { AethexVoiceWidget, AethexVoiceOrb } from "@aethexai/react/widgets"
+import { AethexVoiceOrb } from "@aethexai/react/widgets"
 import { useAethexCall, useAudioLevel, getTranscript } from "@aethexai/react"
 import type { TranscriptTurn, SessionStatusResponse } from "@aethexai/react"
 
 const AGENT_ID = process.env.NEXT_PUBLIC_AETHEX_AGENT_ID ?? "00000000-0000-0000-0000-000000000000"
-// Point at your deployed signaling proxy (see ../../cloudflare-proxy).
-const PROXY_URL = process.env.NEXT_PUBLIC_AETHEX_PROXY_URL ?? "http://localhost:8787"
+
+// Same-origin backend (app/api/aethex/[...path]) that mints tokens with your key
+// and forwards signaling. See its comment for the local-vs-production tradeoff.
+const API_PROXY = "/api/aethex"
+
+// Ephemeral-token flow: fetch a short-lived call token from our server route,
+// then let the SDK authenticate signaling with it. The API key never reaches
+// the browser.
+async function getToken(): Promise<string> {
+  const res = await fetch(`${API_PROXY}/conversation/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ agent_id: AGENT_ID }),
+  })
+  if (!res.ok) throw new Error(`token mint failed (${res.status})`)
+  return (await res.json()).token as string
+}
+
+// Shared call config: agent + token minting, routed through the same-origin proxy.
+const callConfig = { agentId: AGENT_ID, getToken, apiBaseUrl: API_PROXY }
+
+// A live showcase of the seeded canvas orb: five textures, each with a different
+// seed name so the colours vary. `agentName` only sets the look; every orb still
+// calls the same agent. Tap any to place a call.
+const ORB_STYLES = [
+  { orbType: "aurora", agentName: "Kora" },
+  { orbType: "pulse", agentName: "Rhea" },
+  { orbType: "liquid", agentName: "Nia" },
+  { orbType: "fluid", agentName: "Nova" },
+  { orbType: "pixel", agentName: "Bianca" },
+] as const
 
 // Orb clip served from public/orbs. The .webm ships inside @aethexai/react and
 // is copied here by the predev/prebuild step (see scripts/copy-orbs.mjs); the
@@ -16,16 +45,8 @@ const ORB_VIDEO = "/orbs/orb-green.webm"
 
 /** Hook-based usage: full control over the UI, plus the post-call transcript. */
 function CustomCall() {
-  const { status, isConnected, start, stop, remoteStream, error, sessionId, getRemoteStatus } = useAethexCall(
-    {
-      agentId: AGENT_ID,
-      apiBaseUrl: PROXY_URL,
-      // ICE restart is on by default: if the connection reaches `failed`
-      // (network dropped, wifi→cellular), the SDK renegotiates automatically to
-      // recover before surfacing an error. Nothing to wire up here — set
-      // `iceRestart: false` to opt out.
-    },
-  )
+  const { status, isConnected, start, stop, remoteStream, error, sessionId, getRemoteStatus } =
+    useAethexCall(callConfig)
   const { level } = useAudioLevel(remoteStream)
   const [transcript, setTranscript] = useState<TranscriptTurn[] | null>(null)
   const [transcriptError, setTranscriptError] = useState<string | null>(null)
@@ -47,7 +68,7 @@ function CustomCall() {
 
     const attempt = async (n: number): Promise<void> => {
       try {
-        const turns = await getTranscript({ apiBaseUrl: PROXY_URL, sessionId })
+        const turns = await getTranscript({ apiBaseUrl: API_PROXY, sessionId })
         if (cancelled) return
         if (turns.length === 0 && n < MAX_ATTEMPTS) {
           setTimeout(() => attempt(n + 1), RETRY_MS) // still finalizing → retry
@@ -86,6 +107,10 @@ function CustomCall() {
   return (
     <div>
       <h2>Hook (`useAethexCall`) + transcript</h2>
+      <p style={{ color: "#697086", fontSize: 13, marginTop: -8 }}>
+        The headless hook. You render your own UI; this bare button is deliberately unstyled. Use it when you
+        want full control (and it also fetches the transcript after the call).
+      </p>
       <button onClick={isConnected ? stop : start} aria-busy={status === "connecting"}>
         {status === "connecting" ? "Connecting…" : isConnected ? `Hang up · ${level.toFixed(2)}` : "Call"}
       </button>
@@ -132,22 +157,58 @@ function CustomCall() {
 
 export default function Page() {
   return (
-    <main style={{ maxWidth: 480, margin: "4rem auto", fontFamily: "system-ui", display: "grid", gap: 32 }}>
+    <main style={{ maxWidth: 640, margin: "4rem auto", fontFamily: "system-ui", display: "grid", gap: 32 }}>
       <h1>@aethexai/react demo</h1>
 
       <section>
         <h2>Orb (`AethexVoiceOrb`)</h2>
         <p style={{ color: "#697086", fontSize: 13, marginTop: -8 }}>
-          Floats bottom-right by default (look in the corner ↘). Tap it to start a call — the same clip runs
-          throughout. Pass <code>float={"{false}"}</code> to inline it, or{" "}
-          <code>float=&quot;bottom-left&quot;</code> / <code>floatOffset</code> / <code>zIndex</code> to
-          adjust.
+          The orb is generated from the agent&apos;s name, so every agent gets its own colour and texture. Tap
+          one to call. <code>orbType</code> picks the texture; <code>agentName</code> sets the seed.
         </p>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 26,
+            justifyContent: "center",
+            padding: 28,
+            marginTop: 12,
+            background: "#0B0E14",
+            borderRadius: 16,
+          }}
+        >
+          {ORB_STYLES.map((o) => (
+            <div key={o.orbType} style={{ display: "grid", gap: 10, justifyItems: "center" }}>
+              <AethexVoiceOrb
+                {...callConfig}
+                float={false}
+                theme="dark"
+                size="lg"
+                orbType={o.orbType}
+                agentName={o.agentName}
+              />
+              <span
+                style={{
+                  color: "rgba(231,234,243,0.75)",
+                  fontSize: 11,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.14em",
+                }}
+              >
+                {o.orbType}
+              </span>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section>
-        <h2>Widget (`AethexVoiceWidget`)</h2>
-        <AethexVoiceWidget agentId={AGENT_ID} apiBaseUrl={PROXY_URL} title="Talk to the demo agent" />
+        <h2>Drop-in (`AethexVoiceOrb` with a title)</h2>
+        <p style={{ color: "#697086", fontSize: 13, marginTop: -8 }}>
+          One line, no styling needed: an orb, a label, and live status in a themeable capsule.
+        </p>
+        <AethexVoiceOrb {...callConfig} float={false} size="lg" agentName="Kora" title="Talk to Kora" />
       </section>
 
       <section>
@@ -158,8 +219,7 @@ export default function Page() {
           no per-state swapping. The clip ships in @aethexai/react and is copied
           to public/orbs by the predev/prebuild step. */}
       <AethexVoiceOrb
-        agentId={AGENT_ID}
-        apiBaseUrl={PROXY_URL}
+        {...callConfig}
         videoSrc={ORB_VIDEO}
         size="lg"
         labels={{ startAction: "Start talking", stopAction: "Hang up" }}

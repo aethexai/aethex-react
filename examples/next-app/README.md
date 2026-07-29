@@ -1,42 +1,55 @@
 # Next.js (App Router) example
 
-Minimal demo of `@aethexai/react` — shows both the headless hook and the
-ready-made widget inside a client component.
+A local demo of `@aethexai/react` — the headless hook, the ready-made widget,
+and the voice orb — using the **ephemeral-token** flow. There is no separate
+proxy to run: your API key stays on the server, and the browser connects with
+short-lived tokens minted by `app/api/aethex/[...path]`.
 
-## Setup
+## Run it
 
-1. Run the signaling proxy (see [`../cloudflare-proxy`](../cloudflare-proxy)) on
-   `http://localhost:8787`, or deploy it and use its URL.
-2. Configure env vars (e.g. in `.env.local`):
+1. Build the SDK once (this example links it from `../..`):
+
+   ```bash
+   npm --prefix ../.. install
+   npm --prefix ../.. run build
+   ```
+
+2. Set env in `.env.local`:
 
    ```
-   NEXT_PUBLIC_AETHEX_AGENT_ID=<your-agent-uuid>
-   NEXT_PUBLIC_AETHEX_PROXY_URL=http://localhost:8787
+   AETHEX_API_KEY=ae_live_...              # server-side only, never shipped
+   NEXT_PUBLIC_AETHEX_AGENT_ID=<agent-uuid>
    ```
 
-3. Install and run:
+3. Install and start:
 
    ```bash
    npm install
    npm run dev
    ```
 
-Open http://localhost:3000 and click **Call**. WebRTC needs HTTPS in production
-(localhost is exempt).
+Open http://localhost:3000, click **Call** (or tap the orb), allow the
+microphone, and talk. WebRTC needs HTTPS in production; localhost is exempt.
+
+## How it works
+
+- `app/api/aethex/[...path]/route.ts` is a same-origin backend. It mints a call
+  token (`POST /conversation/token`) with your key, and forwards the rest of the
+  signaling, passing the browser's bearer token through so the demo runs the real
+  token-auth path. Routing through it dodges CORS during local testing. In
+  production, allow-list your app's origin on the Aethex API and drop `apiBaseUrl`
+  in the client so the app talks to the API directly, no proxy at all.
+- `app/page.tsx` is a Client Component. It calls `useAethexCall({ agentId,
+getToken, apiBaseUrl })` and passes the same config to `AethexVoiceWidget` and
+  `AethexVoiceOrb`.
+- After the call ends it fetches the transcript through the same route.
+  Transcription is not delivered live.
 
 ## Notes
 
-- `app/page.tsx` is a Client Component (`"use client"`) — required because it
-  uses hooks. The SDK's React/widgets entries also ship a `"use client"` banner,
-  so importing them from a Server Component would correctly mark the boundary.
-- Microphone permission is requested on the first **Call** click.
-- **Video orb.** A single `AethexVoiceOrb` floats bottom-right (its default) and
-  plays one pre-rendered clip via `videoSrc` — no per-state swapping. The `.webm`
-  clips ship **inside `@aethexai/react`** (the `./assets/*` export); the
-  `predev`/`prebuild` step (`scripts/copy-orbs.mjs`) copies them from the package
-  into `public/orbs` so Next can serve them. Swap `orb-green.webm` ↔
-  `orb-magenta.webm`, or point `videoSrc` at your own clip.
-- The hook demo also fetches the **transcript** once the call ends. Transcription
-  isn't delivered live — after `status === "ended"`, `getTranscript({ apiBaseUrl,
-sessionId })` returns the turns (`{ role, text, ... }`) from
-  `GET /conversations/:id/transcript`.
+- `app/page.tsx` is `"use client"` (it uses hooks). The SDK's React/widgets
+  entries also carry a `"use client"` banner.
+- The orb clips ship inside `@aethexai/react` (the `./assets/*` export);
+  `scripts/copy-orbs.mjs` (predev/prebuild) copies them into `public/orbs` so
+  Next can serve them. Swap `orb-green.webm` for `orb-magenta.webm`, or point
+  `videoSrc` at your own clip.

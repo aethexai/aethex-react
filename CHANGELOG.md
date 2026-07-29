@@ -1,5 +1,24 @@
 # @aethexai/react
 
+## 1.0.0
+
+First stable release. Adds React Native support, in-call controls, and end-of-call feedback.
+
+- **React Native**: the hook and `AethexVoiceOrb` run on native through a WebRTC
+  platform adapter (`react-native-webrtc`), with the orb rendered by
+  `@shopify/react-native-skia`. Metro resolves the native build automatically, and
+  `react-native-incall-manager` routes the agent to the loudspeaker.
+- **Call controls**: `setMuted` / `toggleMute` / `isMuted`, `setOutputVolume` /
+  `volume`, and `isSpeaking` (derived from a WebAudio output meter on the web).
+- **Feedback**: `submitFeedback(rating, comment?)` posts an end-of-call rating,
+  authorized by the call token.
+- **Orb controls**: `AethexVoiceOrb` gains opt-in `controls` (mute plus a red
+  hang-up button), a web `showVolume` slider, and a post-call `feedback` prompt,
+  on web and native.
+- **Ephemeral tokens**: `getToken` mints a short-lived token so you can skip the
+  proxy entirely (recommended on mobile, where there is no CORS).
+- Renamed the orb seed prop `voiceName` to `agentName` (`voiceName` still works, deprecated).
+
 ## 0.1.0
 
 Initial public release.

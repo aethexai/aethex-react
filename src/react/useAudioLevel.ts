@@ -16,8 +16,9 @@ export const DEFAULT_BINS = 7
  * stream, runs a `requestAnimationFrame` loop that computes a smoothed 0..1 RMS
  * level, and invokes `onFrame(level, freq)` each frame with the raw frequency
  * bins so callers can derive their own per-bin values. Returns a teardown, or
- * `null` when Web Audio is unavailable (SSR / unsupported host). Also resumes a
- * suspended context on the first user gesture (autoplay policy).
+ * `null` when Web Audio is unavailable (SSR, or React Native, which has no
+ * `AudioContext`). Also resumes a suspended context on the first user gesture
+ * (autoplay policy).
  */
 function meterStream(
   stream: MediaStream,
@@ -77,7 +78,8 @@ function meterStream(
 /**
  * Taps a remote MediaStream and exposes a smoothed overall level plus per-bin
  * levels for a visualizer. SSR-safe (no AudioContext access until the effect
- * runs) and degrades to zeros when Web Audio is unavailable.
+ * runs) and degrades to zeros when Web Audio is unavailable, which includes
+ * **React Native** (no `AudioContext`) — the level stays `0` there.
  *
  * Pass a **stable** `bins` value: changing it tears down and recreates the
  * AudioContext (browsers cap concurrent contexts at ~6).
@@ -115,7 +117,8 @@ export function useAudioLevel(stream: MediaStream | null, bins = DEFAULT_BINS): 
  * React state — so a high-frequency (per-frame) consumer such as a canvas
  * `requestAnimationFrame` loop can read it WITHOUT re-rendering the component on
  * every audio frame. Returns a stable ref holding the latest level (0..1).
- * SSR-safe; degrades to a ref that stays 0 when Web Audio is unavailable.
+ * SSR-safe; degrades to a ref that stays 0 when Web Audio is unavailable (SSR or
+ * React Native).
  */
 export function useAudioLevelRef(stream: MediaStream | null): MutableRefObject<number> {
   const ref = useRef(0)

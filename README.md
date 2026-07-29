@@ -6,8 +6,8 @@
 
 <p align="center">
   <b>The React SDK for Aethex voice agents.</b><br>
-  Start a live voice call with one hook, drop in ready-made UI, or build your own.<br>
-  There is no WebRTC to wire up.
+  Start a live voice call with one hook, on the web or in React Native.<br>
+  Drop in ready-made UI, or build your own. There is no WebRTC to wire up.
 </p>
 
 <p align="center">
@@ -27,9 +27,9 @@
 
 <br>
 
-| 🎙️ Live voice | 🪝 One hook | 🧩 Drop-in widgets | ✨ Voice orb |
-|:--|:--|:--|:--|
-| Talk to any agent in real time | `useAethexCall()` runs the call | Button, panel, and orb, all accessible | A unique orb per agent, five styles |
+| 🎙️ Live voice                  | 🪝 One hook                     | 🧩 Drop-in widgets                            | ✨ Voice orb                        |
+| :----------------------------- | :------------------------------ | :-------------------------------------------- | :---------------------------------- |
+| Talk to any agent in real time | `useAethexCall()` runs the call | Orb with mute, hang-up, and feedback controls | A unique orb per agent, five styles |
 
 ## Install
 
@@ -77,6 +77,32 @@ import { getTranscript } from "@aethexai/react"
 const turns = await getTranscript({ apiBaseUrl, sessionId })
 ```
 
+## Ephemeral tokens (skip the proxy)
+
+Instead of proxying every request, mint a short-lived token on your server and
+hand it to the client with `getToken`. The SDK then talks to the Aethex API
+directly, so you host only a one-line mint route instead of a full proxy. Drop
+`apiBaseUrl` and pass `getToken`:
+
+```tsx
+useAethexCall({
+  agentId,
+  getToken: async () => {
+    const res = await fetch("/api/aethex-token", { method: "POST" })
+    return (await res.json()).token
+  },
+})
+```
+
+Your mint route calls `POST /api/v1/conversation/token` with your API key and
+returns the token. The [Cloudflare proxy example](./examples/cloudflare-proxy)
+exposes it at `POST /token`. The token is scoped to one agent and expires with
+the call, so it is safe to use from the client.
+
+Browser callers need their origin allow-listed for CORS on the Aethex API.
+React Native has no such restriction, so `getToken` is the recommended flow on
+mobile.
+
 ## Widgets
 
 Ready-made, accessible components built on the hook (import from `@aethexai/react/widgets`):
@@ -97,24 +123,34 @@ color with the `--aethex-error-color` CSS variable.
 
 ### Voice orb
 
-`AethexVoiceOrb` is a voice button with an animated orb. Each agent gets its own
-orb, drawn from the agent's name, so every agent looks different. `orbType`
-picks one of five textures:
+`AethexVoiceOrb` is the drop-in voice button: an orb, a label, and live status in
+a themeable capsule (light or dark). One line, no styling required.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/aethexai/aethex-react/main/.github/assets/aethex-react-orbs.png" alt="The five orb styles: pulse, aurora, liquid, fluid, pixel" width="100%">
+  <img src="https://raw.githubusercontent.com/aethexai/aethex-react/main/.github/assets/aethex-react-capsule.png" alt="AethexVoiceOrb capsule in light and dark themes" width="100%">
 </p>
 
-| `orbType` | Texture |
-|:--|:--|
-| `aurora` | fine grain (the default) |
-| `pulse`  | medium blocks, punchy |
-| `liquid` | smooth, no scanlines |
-| `fluid`  | fine and flowing |
-| `pixel`  | chunky blocks with bold scanlines |
+```tsx
+<AethexVoiceOrb agentId={AGENT} getToken={getToken} title="Talk to Kora" />
+```
+
+The orb is generated from the agent's name, so every agent gets its own colour
+and texture. `orbType` picks one of five textures; `agentName` sets the seed:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/aethexai/aethex-react/main/.github/assets/aethex-react-orbs.png" alt="The five orb styles: aurora, pulse, liquid, fluid, pixel" width="100%">
+</p>
+
+| `orbType` | Texture                           |
+| :-------- | :-------------------------------- |
+| `aurora`  | fine grain (the default)          |
+| `pulse`   | medium blocks, punchy             |
+| `liquid`  | smooth, no scanlines              |
+| `fluid`   | fine and flowing                  |
+| `pixel`   | chunky blocks with bold scanlines |
 
 ```tsx
-<AethexVoiceOrb agentId={AGENT} apiBaseUrl={PROXY} orbType="liquid" />
+<AethexVoiceOrb agentId={AGENT} getToken={getToken} orbType="liquid" agentName="Kora" />
 ```
 
 It floats in the bottom-right corner by default (`position: fixed`), the usual
@@ -131,13 +167,119 @@ import { AethexVoiceOrb } from "@aethexai/react/widgets"
 // Bundlers (Vite, webpack) resolve the asset URL for you:
 import orb from "@aethexai/react/assets/orb-green.webm" // or orb-magenta.webm
 
-<AethexVoiceOrb agentId={AGENT} apiBaseUrl={PROXY} videoSrc={orb} />
+;<AethexVoiceOrb agentId={AGENT} apiBaseUrl={PROXY} videoSrc={orb} />
 ```
 
 The clips are not in the JS bundle, so the widgets stay small. They ship as
 separate files. If you serve static files from a folder (for example Next.js
 `public/`), copy the clip out of the package. See the
 [Next example](./examples/next-app) (`scripts/copy-orbs.mjs`).
+
+### Call controls and feedback
+
+Pass `controls` to add a mute toggle and a stylized red hang-up button under the
+orb during a call, `showVolume` for an output-volume slider (web), and `feedback`
+for a one-tap 👍 / 👎 rating once the call ends. All are off by default, so the
+bare orb stays a single tap-to-call button.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/aethexai/aethex-react/main/.github/assets/aethex-react-controls.png" alt="In-call mute and red hang-up controls, and a post-call rating prompt" width="100%">
+</p>
+
+```tsx
+<AethexVoiceOrb agentId={AGENT} getToken={getToken} controls showVolume feedback />
+```
+
+Building your own UI? The hook exposes the same controls directly:
+
+```tsx
+const {
+  isSpeaking, // true while the agent is talking (web)
+  isMuted,
+  setMuted,
+  toggleMute,
+  volume,
+  setOutputVolume, // 0..1; device-level on native
+  submitFeedback, // (rating 1..5, comment?) for the just-ended call
+} = useAethexCall({ agentId, getToken })
+```
+
+`submitFeedback` posts the rating for the call the token opened. It works after
+the call ends, so you can prompt for a rating on the summary screen.
+
+## React Native (Expo)
+
+The same hook runs in React Native. `@aethexai/react` ships a native build that
+Metro resolves automatically, so the import is identical:
+
+```tsx
+import { useAethexCall } from "@aethexai/react"
+
+function CallButton({ agentId, getToken }) {
+  const { isConnected, start, stop } = useAethexCall({ agentId, getToken })
+  return <Button title={isConnected ? "Hang up" : "Talk"} onPress={isConnected ? stop : start} />
+}
+```
+
+On native the SDK runs on `react-native-webrtc` instead of browser WebRTC, and
+the agent's audio plays through the device automatically. Use the
+[ephemeral-token flow](#ephemeral-tokens-skip-the-proxy) (`getToken`) here: React
+Native has no CORS, so the app connects to the Aethex API directly with no proxy
+at all. WebRTC is a native module, so this needs an Expo **development build** (it
+does not run in Expo Go).
+
+Install the native peers and add the config plugin:
+
+```bash
+npx expo install react-native-webrtc @config-plugins/react-native-webrtc expo-dev-client
+```
+
+```json
+// app.json
+{
+  "expo": {
+    "plugins": [
+      [
+        "@config-plugins/react-native-webrtc",
+        { "microphonePermission": "Allow $(PRODUCT_NAME) to use your microphone." }
+      ]
+    ]
+  }
+}
+```
+
+Then build to a device:
+
+```bash
+npx expo prebuild --clean
+npx expo run:ios --device   # iOS needs a real device (the Simulator has no mic)
+npx expo run:android        # an emulator is fine with host-mic input enabled
+```
+
+`AethexVoiceOrb` runs on native too, rendered with
+[`@shopify/react-native-skia`](https://shopify.github.io/react-native-skia/)
+instead of a DOM canvas. Same props as the web orb, including `controls` and
+`feedback`, so the mute and hang-up buttons and the rating prompt work on device:
+
+```tsx
+import { AethexVoiceOrb } from "@aethexai/react/widgets"
+
+;<AethexVoiceOrb agentId={AGENT} getToken={getToken} controls feedback />
+```
+
+Add its peers alongside the WebRTC ones. `react-native-incall-manager` routes the
+agent to the loudspeaker, and Skia needs `react-native-reanimated` (add
+`react-native-reanimated/plugin` to `babel.config.js`, last in the list):
+
+```bash
+npx expo install @shopify/react-native-skia react-native-reanimated react-native-incall-manager
+```
+
+`AethexVoiceWidget` and `AethexCallButton` are web-only; on native, use the orb
+or build on the hook. The audio-level hooks (`useAudioLevel`, `useAudioLevelRef`)
+and `isSpeaking` rely on Web Audio, so they read `0` on native; the orb
+self-animates during a call instead of reacting to the audio. A full runnable app
+is in [`examples/expo-app`](./examples/expo-app).
 
 ## Core (framework-agnostic)
 

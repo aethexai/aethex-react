@@ -6,7 +6,16 @@ const common: Options = {
   sourcemap: true,
   treeshake: true,
   splitting: false,
-  external: ["react", "react-dom"],
+  // RN peers are resolved by the consumer's Metro bundler, never bundled here.
+  external: [
+    "react",
+    "react-dom",
+    "react-native",
+    "react-native-webrtc",
+    "react-native-incall-manager",
+    "@shopify/react-native-skia",
+    "react-native-reanimated",
+  ],
   outExtension({ format }) {
     return { js: format === "cjs" ? ".cjs" : ".js" }
   },
@@ -37,8 +46,10 @@ export default defineConfig([
     ...common,
     entry: {
       index: "src/index.ts",
+      native: "src/native.ts",
       "react/index": "src/react/index.ts",
       "widgets/index": "src/widgets/index.ts",
+      "widgets/native": "src/widgets/native.ts",
     },
     clean: false,
     async onSuccess() {
